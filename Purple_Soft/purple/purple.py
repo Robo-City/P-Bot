@@ -1,42 +1,67 @@
 from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtWidgets import QMessageBox, QLabel
 from PyQt5.QtGui import QPixmap, QPalette, QBrush
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 import sys
+import cv2
+import numpy as np
+import pygame
+import serial
+import time
+import pyttsx3
+import threading
 
-# Global variable to store the current mode
+# Import all activity functions
+from activity_funtions import *
+
+# Initialize serial connection
+try:
+    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    time.sleep(2)
+except serial.SerialException:
+    print("Warning: Could not open serial connection")
+    ser = None
+
+# Initialize text-to-speech engine
+tts_engine = pyttsx3.init()
+
+# Initialize pygame for PS4 controller
+pygame.init()
+pygame.joystick.init()
+
+# Global variables
 current_mode = None
+running = False
 
-# Placeholder for activity functions
-def set_mode(mode):
-    global current_mode
-    current_mode = mode
-    print(f"Mode set to {mode}")
-    QMessageBox.information(None, "Mode Change", f"Mode has been set to: {mode}")
+class ColorFollowingThread(QThread):
+    finished = pyqtSignal()
 
-def stop_all():
-    global current_mode
-    current_mode = None
-    print("All modes stopped")
-    QMessageBox.warning(None, "Stop", "All activities have been stopped!")
+    def run(self):
+        color_following()  # Use the imported function
+        self.finished.emit()
 
-# Main window class
+class PS4ControllerThread(QThread):
+    finished = pyqtSignal()
+
+    def run(self):
+        ps4_controller()  # Use the imported function
+        self.finished.emit()
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-
         self.setWindowTitle("RC Purple Bot")
         self.setGeometry(100, 100, 800, 600)
 
         # Set background image
-        self.set_background_image("background.jpg")  # Replace with your image path
+        self.set_background_image("background.jpg")
 
         # Central widget and main layout
         self.central_widget = QtWidgets.QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QtWidgets.QVBoxLayout(self.central_widget)
 
-        # Create the stacked layout to handle different menus
+        # Create the stacked layout
         self.stacked_layout = QtWidgets.QStackedLayout()
         self.main_layout.addLayout(self.stacked_layout)
 
@@ -52,13 +77,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.create_pay_load_menu()
         self.create_farm_menu()
 
-        # Add menus to the stacked layout
+        # Add menus to stacked layout
         self.stacked_layout.addWidget(self.menu_widget)
         self.stacked_layout.addWidget(self.home_widget)
         self.stacked_layout.addWidget(self.pay_load_widget)
         self.stacked_layout.addWidget(self.farm_widget)
 
-        # Show the main menu initially
+        # Show main menu initially
         self.stacked_layout.setCurrentWidget(self.menu_widget)
 
         # Create navigation bar
@@ -72,13 +97,16 @@ class MainWindow(QtWidgets.QMainWindow):
         # Apply styling
         self.set_style()
 
-        # Start the mode update timer
+        # Start mode update timer
         self.mode_timer = QtCore.QTimer(self)
         self.mode_timer.timeout.connect(self.update_mode_display)
-        self.mode_timer.start(1000)  # Update every 1 second
+        self.mode_timer.start(1000)
+
+        # Create keyboard handler
+        self.key_handler = KeyHandler()
+        self.installEventFilter(self.key_handler)
 
     def set_background_image(self, image_path):
-        """Set the background image for the main window."""
         try:
             background = QPixmap(image_path)
             if background.isNull():
@@ -91,11 +119,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.setAutoFillBackground(True)
         except Exception as e:
             print(f"Error setting background image: {e}")
-            # Fallback to a solid color if image loading fails
             self.setStyleSheet("background-color: #2b2b2b;")
 
     def set_style(self):
-        """Set a modern industrial black and yellow style."""
         self.setStyleSheet("""
             QWidget {
                 color: #f5f5f5;
@@ -128,7 +154,6 @@ class MainWindow(QtWidgets.QMainWindow):
         """)
 
     def create_navigation_bar(self):
-        """Create a navigation bar at the top of the window."""
         nav_bar = QtWidgets.QHBoxLayout()
         self.main_layout.insertLayout(0, nav_bar)
 
@@ -145,7 +170,6 @@ class MainWindow(QtWidgets.QMainWindow):
             nav_bar.addWidget(button)
 
     def create_main_menu(self):
-        """Create the main menu with various options."""
         layout = QtWidgets.QGridLayout()
         self.menu_widget.setLayout(layout)
 
@@ -169,7 +193,6 @@ class MainWindow(QtWidgets.QMainWindow):
             layout.addWidget(button, row, col, QtCore.Qt.AlignCenter)
 
     def create_home_menu(self):
-        """Create the Home menu with specific commands."""
         layout = QtWidgets.QGridLayout()
         self.home_widget.setLayout(layout)
 
@@ -192,7 +215,6 @@ class MainWindow(QtWidgets.QMainWindow):
             layout.addWidget(button, row, col, QtCore.Qt.AlignCenter)
 
     def create_pay_load_menu(self):
-        """Create the PayLoad menu."""
         layout = QtWidgets.QGridLayout()
         self.pay_load_widget.setLayout(layout)
 
@@ -213,16 +235,15 @@ class MainWindow(QtWidgets.QMainWindow):
             layout.addWidget(button, row, col, QtCore.Qt.AlignCenter)
 
     def create_farm_menu(self):
-        """Create the Farm Mode menu."""
         layout = QtWidgets.QGridLayout()
         self.farm_widget.setLayout(layout)
 
         buttons = [
-            ("Mapping", lambda: set_mode("Mapping")),
-            ("Disinfect", lambda: set_mode("Disinfection")),
-            ("Watering", lambda: set_mode("Watering")),
-            ("Plant Health", lambda: set_mode("Plant_health")),
-            ("Harvesting", lambda: set_mode("Harvesting")),
+            ("Mapping", lambda: set_mode("MAPPING")),
+            ("Disinfect", lambda: set_mode("DISINFECTION")),
+            ("Watering", lambda: set_mode("WATERING")),
+            ("Plant Health", lambda: set_mode("PLANT_HEALTH")),
+            ("Harvesting", lambda: set_mode("HARVESTING")),
             ("Stop", stop_all),
         ]
 
@@ -235,18 +256,63 @@ class MainWindow(QtWidgets.QMainWindow):
             layout.addWidget(button, row, col, QtCore.Qt.AlignCenter)
 
     def show_message(self, message):
-        """Show a message box with the given message."""
         QMessageBox.information(self, "Info", message)
 
     def update_mode_display(self):
-        """Update the mode display label with the current mode."""
         if current_mode:
             self.mode_label.setText(f"Active mode: {current_mode}")
         else:
             self.mode_label.setText("No active mode")
 
+class KeyHandler(QtCore.QObject):
+    def eventFilter(self, obj, event):
+        if event.type() == QtCore.QEvent.KeyPress:
+            if current_mode == "FREE_ROAM":
+                if event.key() == Qt.Key_W:
+                    send_command('FORWARD')
+                elif event.key() == Qt.Key_S:
+                    send_command('BACKWARD')
+                elif event.key() == Qt.Key_A:
+                    send_command('LEFT')
+                elif event.key() == Qt.Key_D:
+                    send_command('RIGHT')
+                elif event.key() == Qt.Key_Space:
+                    send_command('STOP')
+            return True
+        return super().eventFilter(obj, event)
+
+def set_mode(mode):
+    global current_mode, running
+    if current_mode:
+        stop_all()
+    
+    current_mode = mode
+    running = True
+    
+    if mode == "COLOR_FOLLOW":
+        color_thread = ColorFollowingThread()
+        color_thread.start()
+    elif mode == "PS4_CONTROLLER":
+        tts_engine.say("PS4 Controller mode activated")
+        tts_engine.runAndWait()
+        ps4_thread = PS4ControllerThread()
+        ps4_thread.start()
+    elif mode == "FREE_ROAM":
+        tts_engine.say("Free roam mode activated. Use WASD keys to control the robot.")
+        tts_engine.runAndWait()
+    # Add other modes as needed
+
+def stop_all():
+    global current_mode, running
+    running = False
+    current_mode = None
+    send_command('STOP')
+    tts_engine.say("Stopping all activities")
+    tts_engine.runAndWait()
+
 # Run the application
-app = QtWidgets.QApplication(sys.argv)
-main_window = MainWindow()
-main_window.show()
-sys.exit(app.exec_())
+if __name__ == "__main__":
+    app = QtWidgets.QApplication(sys.argv)
+    main_window = MainWindow()
+    main_window.show()
+    sys.exit(app.exec_())
