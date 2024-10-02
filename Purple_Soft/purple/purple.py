@@ -1,13 +1,22 @@
 from PyQt5 import QtWidgets, QtGui, QtCore
-from PyQt5.QtWidgets import QMessageBox
+from PyQt5.QtWidgets import QMessageBox, QLabel
+from PyQt5.QtGui import QPixmap, QPalette, QBrush
+from PyQt5.QtCore import Qt
 import sys
+
+# Global variable to store the current mode
+current_mode = None
 
 # Placeholder for activity functions
 def set_mode(mode):
+    global current_mode
+    current_mode = mode
     print(f"Mode set to {mode}")
     QMessageBox.information(None, "Mode Change", f"Mode has been set to: {mode}")
 
 def stop_all():
+    global current_mode
+    current_mode = None
     print("All modes stopped")
     QMessageBox.warning(None, "Stop", "All activities have been stopped!")
 
@@ -18,6 +27,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.setWindowTitle("RC Purple Bot")
         self.setGeometry(100, 100, 800, 600)
+
+        # Set background image
+        self.set_background_image("background.jpg")  # Replace with your image path
 
         # Central widget and main layout
         self.central_widget = QtWidgets.QWidget()
@@ -49,19 +61,48 @@ class MainWindow(QtWidgets.QMainWindow):
         # Show the main menu initially
         self.stacked_layout.setCurrentWidget(self.menu_widget)
 
+        # Create navigation bar
+        self.create_navigation_bar()
+
+        # Create mode display label
+        self.mode_label = QLabel("No active mode")
+        self.mode_label.setAlignment(Qt.AlignCenter)
+        self.main_layout.addWidget(self.mode_label)
+
         # Apply styling
         self.set_style()
+
+        # Start the mode update timer
+        self.mode_timer = QtCore.QTimer(self)
+        self.mode_timer.timeout.connect(self.update_mode_display)
+        self.mode_timer.start(1000)  # Update every 1 second
+
+    def set_background_image(self, image_path):
+        """Set the background image for the main window."""
+        try:
+            background = QPixmap(image_path)
+            if background.isNull():
+                raise FileNotFoundError("Image file not found or invalid")
+            
+            scaled_background = background.scaled(self.size(), QtCore.Qt.KeepAspectRatioByExpanding, QtCore.Qt.SmoothTransformation)
+            palette = QPalette()
+            palette.setBrush(QPalette.Window, QBrush(scaled_background))
+            self.setPalette(palette)
+            self.setAutoFillBackground(True)
+        except Exception as e:
+            print(f"Error setting background image: {e}")
+            # Fallback to a solid color if image loading fails
+            self.setStyleSheet("background-color: #2b2b2b;")
 
     def set_style(self):
         """Set a modern industrial black and yellow style."""
         self.setStyleSheet("""
             QWidget {
-                background-color: #2b2b2b;
                 color: #f5f5f5;
                 font-size: 18px;
             }
             QPushButton {
-                background-color: #ffcc00;
+                background-color: rgba(255, 204, 0, 200);
                 border: 2px solid #ffaa00;
                 border-radius: 10px;
                 padding: 10px;
@@ -69,16 +110,39 @@ class MainWindow(QtWidgets.QMainWindow):
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #ffaa00;
+                background-color: rgba(255, 170, 0, 200);
             }
             QPushButton:pressed {
-                background-color: #ddaa00;
+                background-color: rgba(221, 170, 0, 200);
             }
             QMessageBox {
                 background-color: #2b2b2b;
                 color: #f5f5f5;
             }
+            QLabel {
+                background-color: rgba(0, 0, 0, 150);
+                color: #ffffff;
+                padding: 5px;
+                border-radius: 5px;
+            }
         """)
+
+    def create_navigation_bar(self):
+        """Create a navigation bar at the top of the window."""
+        nav_bar = QtWidgets.QHBoxLayout()
+        self.main_layout.insertLayout(0, nav_bar)
+
+        nav_buttons = [
+            ("Main Menu", lambda: self.stacked_layout.setCurrentWidget(self.menu_widget)),
+            ("Home", lambda: self.stacked_layout.setCurrentWidget(self.home_widget)),
+            ("PayLoad", lambda: self.stacked_layout.setCurrentWidget(self.pay_load_widget)),
+            ("Farm", lambda: self.stacked_layout.setCurrentWidget(self.farm_widget)),
+        ]
+
+        for name, func in nav_buttons:
+            button = QtWidgets.QPushButton(name)
+            button.clicked.connect(func)
+            nav_bar.addWidget(button)
 
     def create_main_menu(self):
         """Create the main menu with various options."""
@@ -117,7 +181,6 @@ class MainWindow(QtWidgets.QMainWindow):
             ("Chat with Me", lambda: set_mode("CHAT_WITH_ME")),
             ("Take Picture", lambda: set_mode("TAKE_PICTURE")),
             ("Stop", stop_all),
-            ("Back", lambda: self.stacked_layout.setCurrentWidget(self.menu_widget)),
         ]
 
         for index, (name, func) in enumerate(buttons):
@@ -139,7 +202,6 @@ class MainWindow(QtWidgets.QMainWindow):
             ("Free Roam", lambda: set_mode("FREE_ROAM")),
             ("ROS Mode", lambda: set_mode("ROS")),
             ("Stop", stop_all),
-            ("Back", lambda: self.stacked_layout.setCurrentWidget(self.menu_widget)),
         ]
 
         for index, (name, func) in enumerate(buttons):
@@ -162,7 +224,6 @@ class MainWindow(QtWidgets.QMainWindow):
             ("Plant Health", lambda: set_mode("Plant_health")),
             ("Harvesting", lambda: set_mode("Harvesting")),
             ("Stop", stop_all),
-            ("Back", lambda: self.stacked_layout.setCurrentWidget(self.menu_widget)),
         ]
 
         for index, (name, func) in enumerate(buttons):
@@ -176,6 +237,13 @@ class MainWindow(QtWidgets.QMainWindow):
     def show_message(self, message):
         """Show a message box with the given message."""
         QMessageBox.information(self, "Info", message)
+
+    def update_mode_display(self):
+        """Update the mode display label with the current mode."""
+        if current_mode:
+            self.mode_label.setText(f"Active mode: {current_mode}")
+        else:
+            self.mode_label.setText("No active mode")
 
 # Run the application
 app = QtWidgets.QApplication(sys.argv)
